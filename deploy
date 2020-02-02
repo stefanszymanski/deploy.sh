@@ -1,0 +1,392 @@
+#!/bin/bash
+
+while getopts "t:p:c:dusnaivwlLDh" option; do
+  case "$option" in
+    t) target="$OPTARG";;
+    p) project="$OPTARG";;
+    c) config="$OPTARG";;
+    d) use_default_target=true;;
+    u) git_unstaged_files=true;;
+    s) git_staged_files=true;;
+    n) git_new_files=true;;
+    a) all_files=true;;
+    i) ignore_git_ignore=true;;
+    v) verbose=true;;
+    w) warnings=true;;
+    l) mode_list=true;;
+    L) mode_list=true; mode_minimal_list=true;;
+    D) dry_run=true;;
+    h) mode_help=true;;
+    \?) echo "Invalid option -$OPTARG" >&2;;
+  esac
+done
+# create a run id and names for temporary files
+tmp_dir="/tmp/deploy"
+id=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
+exclude_file="$tmp_dir/$id.excluded"
+tgz_file="$tmp_dir/deploy-$id.tgz"
+mkdir -p $tmp_dir
+
+# remove temporary files on exit
+cleanup() {
+    if [[ -f $exclude_file ]]; then
+        rm -f $exclude_file
+    fi
+    if [[ -f $tgz_file ]]; then
+        rm -f $tgz_file
+    fi
+}
+trap "cleanup" EXIT
+
+usage() {
+    cat <<-END
+Usage: deploy -t [TARGET] [FILE]...
+
+A simple deploy script.
+
+Examples:
+  deploy -t dev src/adir    # deploy src/adir on dev
+  deploy -t dev -sun        # deploy uncommited files on dev
+  deploy -da                # deploy all files on the default target
+  deploy -lv                # list availabe targets with additional information
+
+Arguments:
+  -t TARGET     target to deploy on
+  -p DIR        project directory
+                if omitted and in a git repository the repository root is used
+                otherwise the current working directory
+  -d            Use the default target
+  -c FILE       targets configuration file
+                if omitted .deploy.conf from the project directory is used
+  -a            deploy all files
+                when set all other file specifying arguments are ignored
+  -v            be verbose
+  -w            show warnings
+  -D            dry run
+  -l            list available targets
+  -h            show this help
+
+Arguments for git projects:
+  -s            deploy staged files
+  -u            deploy unstaged files
+  -n            deploy new/untracked files
+  -i            do not respect .gitignore
+END
+    exit 1
+}
+
+# print help text
+if [ $mode_help ]; then
+    usage
+fi
+
+# get the content of a section
+readsection() {
+    local config=$1
+    local section=$2
+    awk -v SECTION="$section" '
+      {
+        if ($0 ~ /^\[.*\]$/) {
+          gsub(/^\[|\]$/, "", $0)
+          CUR=$0
+      } else if (($0 !~ /^#/) && (NF > 0) && (CUR==SECTION)) {
+          print $0
+        }
+    }' "$config"
+}
+
+# check if a section exists
+config_has_section() {
+    local config=$1
+    local section=$2
+    awk -v SECTION="[$section]" '{if ($0==SECTION) {print 1}}' "$config"
+}
+
+# get the default target for a branch
+get_default_target() {
+    local config=$1
+    local branch=$2
+    readsection "$config" "branch:$branch:default" || readsection "$config" "default"
+}
+
+# find a target configuration by name and branch
+find_target() {
+    local config=$1
+    local target=$2
+    local branch=$3
+    if [ $branch ] && [ $(config_has_section "$config" "branch:$branch:targets") ]; then
+        local _target=$(awk -v TARGET="$target" '$1==TARGET { print $0 }' <<< $(readsection "$config" "branch:$branch:targets"))
+        if [ "$_target" ]; then
+            local __target=($_target)
+            if [[ ${#__target[@]} -gt 1 ]]; then
+                echo "$_target"
+            else
+                find_target "$config" "$target"
+            fi
+        fi
+    else
+        awk -v TARGET="$target" '$1==TARGET { print $0 }' <<< $(readsection "$config" "targets")
+    fi
+}
+
+# find a server configuration by name
+find_server() {
+    local config=$1
+    local server=$2
+    awk -v SERVER="$server" '$1==SERVER {print $0}' <<< $(readsection "$config" "servers")
+}
+
+get_targets() {
+    local config=$1;
+    local branch=$2
+    if [ "$branch" ]; then
+        while IFS= read -r line; do
+            local btarget=(${line})
+            if [[ ${#btarget[@]} -gt 1 ]]; then
+                echo "${btarget[@]}"
+            else
+                echo $(find_target "$config" "${btarget[0]}" "$branch")
+            fi
+        done <<< $(readsection "$config" "branch:$branch:targets")
+    else
+        readsection "$config" "targets"
+    fi
+}
+
+# find project directory
+if [ ! "$project" ]; then
+    project=$(git rev-parse --show-toplevel 2> /dev/null || pwd)
+fi
+
+# check for config file
+if [ ! "$config" ]; then
+    config="$project/.deploy.conf"
+fi
+if [ ! -r "$config" ]; then
+    echo "ERROR: $config is not readable" >&2
+    exit 1
+fi
+
+# check if inside a git repository
+git -C "$project" rev-parse 2> /dev/null && is_git=true
+
+if [ $is_git ]; then
+    git_branch=$(git rev-parse --abbrev-ref HEAD)
+fi
+
+# mode: list available targets
+if [ $mode_list ]; then
+    if [ ! $mode_minimal_list ]; then
+        indent="  "
+        echo "Project:  $project"
+        echo -n "  Git:    "; [ $is_git ] && echo "yes" || echo "no"
+        echo "Targets:"
+    fi
+    while IFS= read -r line; do
+        t=(${line})
+        if [ $verbose ]; then
+            printf "$indent%-15s %s -> %s:%s\n" ${t[0]} ${t[2]} ${t[1]} ${t[3]}
+        else
+            echo "$indent${t[0]}"
+        fi
+    done <<< $(get_targets "$config" "$git_branch")
+    exit
+fi
+
+# check for conflicting arguments
+if [ "$use_default_target" ] && [ "$target" ]; then
+    echo "ERROR: arguments -t and -d can't be used at the same time" >&2
+    exit 1
+fi
+
+# check for used git only arguments
+if [ $git_unstaged_files ] || [ $git_staged_files ] || \
+   [ $git_new_files ] || [ $ignore_git_ignore ] &&  \
+   [ ! $is_git ]; then
+    echo "ERROR: arguments -s, -u, -n and -i can only be used on git projects" >&2
+    exit 1
+fi
+
+# check for default target
+if [ $use_default_target ]; then
+    target=$(get_default_target "$config" "$git_branch")
+    if [ ! $target ]; then
+        echo "ERROR: no default target configured" >&2
+        exit 1
+    fi
+fi
+
+# get target configuration
+if [ ! "$target" ]; then
+    echo "ERROR: no target given" >&2
+    exit 1
+fi
+target_config=($(find_target "$config" "$target" "$git_branch"))
+if [ ! "$target_config" ]; then
+    echo "ERROR: target '$target' not defined" >&2
+    exit 1
+fi
+server=${target_config[1]}
+ldir=${target_config[2]}
+rdir=${target_config[3]}
+
+# get server configuration
+server_config=($(find_server "$config" "$server"))
+if [ ! "$server_config" ]; then
+    echo "ERROR: server '$server' not defined" >&2
+    exit 1
+fi
+host=${server_config[1]}
+auth_type=${server_config[2]}
+auth_config=${server_config[@]:3}
+
+
+# get files for deployment
+if [ $all_files ]; then
+    files=($ldir)
+else
+    # get explitly specified files
+    for file in $@; do
+        if [[ ! -f $file ]] && [[ ! -d $file ]]; then
+            if [ $warnings ]; then
+                echo "WARNING: file $file doesn't exist" >&2
+            fi
+        elif [[ ! $(realpath $file) == $project/$ldir/* ]]; then
+            if [ $warnings ]; then
+                echo "WARNING: file $file is outside of deployable directory" >&2
+            fi
+        else
+            files+=($(realpath --relative-to=$project $file))
+        fi
+    done
+
+    # get files via git
+    if [ $git_unstaged_files ]; then
+        files+=($(git ls-files --full-name --modified $project/$ldir))
+    fi
+    if [ $git_staged_files ]; then
+        files+=($(git diff --name-only --cached $project/$ldir))
+    fi
+    if [ $git_new_files ]; then
+        files+=($(git ls-files --full-name --others --exclude-standard $project/$ldir))
+    fi
+
+    # remove duplicates
+    files=($(echo ${files[@]} | tr ' ' '\n' | sort -u | tr '\n' ' '))
+fi
+
+if [ $verbose ]; then
+    echo "ID:         $id"
+fi
+echo "Project:    $project"
+echo -n "  Git:      "; [ $is_git ] && echo "yes" || echo "no"
+echo "  Dir:      $ldir"
+echo "Target:     $target"
+echo "  Host:     $host"
+echo "  Dir:      $rdir"
+
+if [[ ${#files[@]} -eq 0 ]]; then
+    echo 'No files to deploy'
+    exit
+fi
+
+echo "Files:"
+for file in ${files[@]}; do
+    echo "  $file"
+done
+
+# get ignored files from git
+if [ ! $ignore_git_ignore ]; then
+    param_exclude="--exclude-from=$exclude_file"
+    _ldir=$(sed 's/\//\\\//g' <<< "$ldir")
+    git status --ignored | awk "/^!! $_ldir\// {gsub(/^!! $_ldir\//, \"\"); gsub(/\/\$/, \"\"); print \$1}" > $exclude_file
+    # display ignored files
+    if [[ $(wc -l < $exclude_file) -gt 0 ]]; then
+        echo "Ignore:"
+        for file in $(cat $exclude_file); do
+            echo "  $ldir/$file"
+        done
+    fi
+fi
+
+# check for dry run
+if [ $dry_run ]; then
+    exit
+fi
+
+# pack the files
+param_file="--file=$tgz_file"
+param_directory="--directory=$project/$ldir"
+for file in ${files[@]}; do
+    param_files+=($(realpath --relative-to="$project/$ldir/" "$project/$file"))
+done
+echo -n "Packing ... "
+mkdir -p $tmp_dir
+tar --create --gzip $param_directory $param_exclude $param_file ${param_files[@]}
+echo "packed ($(stat -c %s $tgz_file | numfmt --to=iec-i --suffix=B))"
+
+
+if [[ "$auth_type" -eq "pass" ]]; then
+    # get connection password from pass
+    password=$(pass ${auth_config[0]} 2> /dev/null)
+    if [ ! "$password" ]; then
+        echo "ERROR: password not found" >&2
+        exit 1
+    fi
+fi
+
+# run a ssh or scp command and fill in the password when prompted for
+run_expect() {
+    expect <<- DONE
+        log_user 0
+        set timeout $3
+        spawn $1
+        expect {
+            "assword:" {
+                send "$2\r"
+                expect {
+                    eof {
+                        exit 0
+                    }
+                }
+                exit 1
+            }
+            timeout exit 2
+        }
+        exit 1
+DONE
+    case "$?" in
+        1) echo "failed"; echo "SSH connection failed" >&2; exit 1;;
+        2) echo "timed out"; echo "SSH connection timed out" >&2; exit 1;;
+    esac
+}
+
+run() {
+    eval "$1"
+    if [[ $? -gt 0 ]]; then
+        echo "failed"
+        exit 1
+    fi
+}
+
+# copy tgz to remote system
+cmd="scp $tgz_file $host:/tmp/deploy-$id.tgz"
+echo -n "Transfering ... "
+case "$auth_type" in
+    "pass") run_expect "$cmd" "$password" 600;;
+    "prompt") run "$cmd";;
+esac
+echo "transfered"
+
+
+# unpack and delete tgz
+cmd="ssh $host \"tar --directory=$rdir --extract --gzip --file /tmp/deploy-$id.tgz ; rm -f /tmp/deploy-$id.tgz\""
+echo -n "Unpacking ... "
+case "$auth_type" in
+    "pass") run_expect "$cmd" "$password" 600;;
+    "prompt") run "$cmd";;
+esac
+echo " unpacked"
+
+echo "Finished"
+exit
