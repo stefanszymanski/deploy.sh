@@ -2,6 +2,30 @@
 
 This is a simple bash script for deploying projects via scp to remote hosts.
 
+## Installation
+
+```
+git clone https://github.com/stefanszymanski/deploy.sh
+cd deploy.sh
+make install
+```
+
+Per default the script is installed in `$HOME/.local/bin`.
+If you want it to be installed in another directory use
+
+```
+make BINDIR=$HOME/another/directory install
+```
+
+There's also a zsh completion script.
+The default directory `$HOME/.local/share/zsh/completion` can be changed with `ZSHCOMPDIR`.
+
+```
+make install-zsh-completion
+# OR
+make ZSHCOMPDIR=$HOME/somewhere/else install-zsh-completion
+```
+
 ## Usage
 
 ```
