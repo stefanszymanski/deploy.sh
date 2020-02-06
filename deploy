@@ -153,6 +153,12 @@ get_targets() {
     fi
 }
 
+get_post_commands() {
+    local config=$1
+    local name=$2
+    readsection "$config" "postcmd:$name"
+}
+
 # find project directory
 if [ ! "$project" ]; then
     project=$(git rev-parse --show-toplevel 2> /dev/null || pwd)
@@ -229,6 +235,7 @@ fi
 server=${target_config[1]}
 ldir=${target_config[2]}
 rdir=${target_config[3]}
+postcmd=${target_config[4]}
 
 # get server configuration
 server_config=($(find_server "$config" "$server"))
@@ -240,6 +247,16 @@ host=${server_config[1]}
 auth_type=${server_config[2]}
 auth_config=${server_config[@]:3}
 
+# get post commands
+postcmds=()
+IFS=';' read -ra postcmd_keys <<< "$postcmd"
+for c in ${postcmd_keys[@]}; do
+    while IFS= read -r _postcmd; do
+        if [ "$_postcmd" ]; then
+            postcmds+=("$_postcmd")
+        fi
+    done <<< $(get_post_commands "$config" "$c")
+done
 
 # get files for deployment
 if [ $all_files ]; then
@@ -275,6 +292,7 @@ else
     files=($(echo ${files[@]} | tr ' ' '\n' | sort -u | tr '\n' ' '))
 fi
 
+# print project and deployment information
 if [ $verbose ]; then
     echo "ID:         $id"
 fi
@@ -285,11 +303,23 @@ echo "Target:     $target"
 echo "  Host:     $host"
 echo "  Dir:      $rdir"
 
+# exit if there aren't any files to deploy
 if [[ ${#files[@]} -eq 0 ]]; then
     echo 'No files to deploy'
     exit
 fi
 
+# print post commands
+if [ $verbose ] && [ "$postcmd" ]; then
+    echo "Post cmds:  $postcmd"
+    if [ ${#postcmds[@]} -gt 0 ]; then
+        for c in "${postcmds[@]}"; do
+            echo "  $c"
+        done
+    fi
+fi
+
+# print files for deploy
 echo "Files:"
 for file in ${files[@]}; do
     echo "  $file"
@@ -378,9 +408,17 @@ case "$auth_type" in
 esac
 echo "transfered"
 
-
-# unpack and delete tgz
+# build command for unpacking and post actions
 cmd="ssh $host \"tar --directory=$rdir --extract --gzip --file /tmp/deploy-$id.tgz ; rm -f /tmp/deploy-$id.tgz\""
+if [ "$postcmds" ]; then
+    cmd+=" && cd $rdir"
+    for c in ${postcmds[@]}; do
+        cmd+=" && $c"
+    done
+fi
+echo $cmd
+
+# unpack and delete tgz and run post commands
 echo -n "Unpacking ... "
 case "$auth_type" in
     "pass") run_expect "$cmd" "$password" 600;;

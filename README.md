@@ -83,10 +83,17 @@ stage     user@other-host     pass            project/ssh/stage
 live      user@example.org    pass            project/ssh/live
 
 [targets]
-# <name>  <server>            <local-dir>     <remote-dir>
-dev       dev                 src/public      /var/www/htdocs
-dev2      dev                 src/public      /var/www2/htdocs
-stage     stage               src/public      /var/www/htdocs
+# <name>  <server>            <local-dir>     <remote-dir>          <post-commands>
+dev       dev                 src/public      /var/www/htdocs       rights-plugins
+dev2      dev                 src/public      /var/www2/htdocs      rights-plugins
+stage     stage               src/public      /var/www/htdocs       rights-plugins;rights-bin
+
+[postcmd:rights-plugins]
+find plugins -type d -exec chmod 775 {} \;
+find plugins -type f -exec chmod 644 {} \;
+
+[postcmd:rights-bin]
+find bin -type f -exec chmod +x {} \;
 
 [default]
 # a target name
