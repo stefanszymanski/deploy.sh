@@ -4,7 +4,7 @@ while getopts "t:p:c:dusnaivwlLDh" option; do
   case "$option" in
     t) target="$OPTARG";;
     p) project="$OPTARG";;
-    c) config="$OPTARG";;
+    c) config_file="$OPTARG";;
     d) use_default_target=true;;
     u) git_unstaged_files=true;;
     s) git_staged_files=true;;
@@ -92,14 +92,14 @@ readsection() {
       } else if (($0 !~ /^#/) && (NF > 0) && (CUR==SECTION)) {
           print $0
         }
-    }' "$config"
+    }' <<< "$config"
 }
 
 # check if a section exists
 config_has_section() {
     local config=$1
     local section=$2
-    awk -v SECTION="[$section]" '{if ($0==SECTION) {print 1}}' "$config"
+    awk -v SECTION="[$section]" '{if ($0==SECTION) {print 1}}' <<< "$config"
 }
 
 # get the default target for a branch
@@ -136,6 +136,7 @@ find_server() {
     awk -v SERVER="$server" '$1==SERVER {print $0}' <<< $(readsection "$config" "servers")
 }
 
+# get all targets
 get_targets() {
     local config=$1;
     local branch=$2
@@ -153,6 +154,7 @@ get_targets() {
     fi
 }
 
+# get post commands by name
 get_post_commands() {
     local config=$1
     local name=$2
@@ -165,13 +167,15 @@ if [ ! "$project" ]; then
 fi
 
 # check for config file
-if [ ! "$config" ]; then
-    config="$project/.deploy.conf"
+if [ ! "$config_file" ]; then
+    config_file="$project/.deploy.conf"
 fi
-if [ ! -r "$config" ]; then
-    echo "ERROR: $config is not readable" >&2
+if [ ! -r "$config_file" ]; then
+    echo "ERROR: $config_file is not readable" >&2
     exit 1
 fi
+
+config=$(<$config_file)
 
 # check if inside a git repository
 git -C "$project" rev-parse 2> /dev/null && is_git=true
