@@ -409,14 +409,14 @@ esac
 echo "transfered"
 
 # build command for unpacking and post actions
-cmd="ssh $host \"tar --directory=$rdir --extract --gzip --file /tmp/deploy-$id.tgz ; rm -f /tmp/deploy-$id.tgz\""
+cmd="ssh $host \"tar --directory=$rdir --extract --gzip --file /tmp/deploy-$id.tgz ; rm -f /tmp/deploy-$id.tgz"
 if [ "$postcmds" ]; then
     cmd+=" && cd $rdir"
-    for c in ${postcmds[@]}; do
+    for c in "${postcmds[@]}"; do
         cmd+=" && $c"
     done
 fi
-echo $cmd
+cmd+="\""
 
 # unpack and delete tgz and run post commands
 echo -n "Unpacking ... "

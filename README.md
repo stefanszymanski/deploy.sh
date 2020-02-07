@@ -89,11 +89,12 @@ dev2      dev                 src/public      /var/www2/htdocs      rights-plugi
 stage     stage               src/public      /var/www/htdocs       rights-plugins;rights-bin
 
 [postcmd:rights-plugins]
-find plugins -type d -exec chmod 775 {} \;
-find plugins -type f -exec chmod 644 {} \;
+# backslashes must be escaped!
+find plugins -type d -exec chmod 775 {} \\;
+find plugins -type f -exec chmod 644 {} \\;
 
 [postcmd:rights-bin]
-find bin -type f -exec chmod +x {} \;
+find bin -type f -exec chmod +x {} \\;
 
 [default]
 # a target name
