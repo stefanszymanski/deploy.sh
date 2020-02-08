@@ -1,10 +1,11 @@
 #!/bin/bash
 
-while getopts "t:p:c:dusnaivwlLDh" option; do
+while getopts "t:p:c:I:dusnaivwlLDh" option; do
   case "$option" in
     t) target="$OPTARG";;
     p) project="$OPTARG";;
-    c) config_file="$OPTARG";;
+    c) config="$OPTARG";;
+    I) mode_info=true; infofields="$OPTARG";;
     d) use_default_target=true;;
     u) git_unstaged_files=true;;
     s) git_staged_files=true;;
@@ -161,9 +162,27 @@ get_post_commands() {
     readsection "$config" "postcmd:$name"
 }
 
+cwd=$(pwd)
+
+if [ $mode_info ]; then
+    for (( i=0; i<${#infofields}; i++ )); do
+        case "${infofields:$i:1}" in
+            l) mode_info_ldir=true;;
+            L) mode_info_ldir_absolute=true;;
+            P) mode_info_project=true;;
+        esac
+    done
+fi
+
 # find project directory
-if [ ! "$project" ]; then
-    project=$(git rev-parse --show-toplevel 2> /dev/null || pwd)
+if [ "$project" ]; then
+    project=$(realpath "$project")
+else
+    project=$(git rev-parse --show-toplevel 2> /dev/null || "$cwd")
+fi
+
+if [ $mode_info_project ]; then
+    echo "$project"
 fi
 
 # check for config file
@@ -181,7 +200,7 @@ config=$(<$config_file)
 git -C "$project" rev-parse 2> /dev/null && is_git=true
 
 if [ $is_git ]; then
-    git_branch=$(git rev-parse --abbrev-ref HEAD)
+    git_branch=$(git -C "$project" rev-parse --abbrev-ref HEAD)
 fi
 
 # mode: list available targets
@@ -261,6 +280,18 @@ for c in ${postcmd_keys[@]}; do
         fi
     done <<< $(get_post_commands "$config" "$c")
 done
+
+# mode: info
+if [ $mode_info_ldir ]; then
+    echo "$ldir"
+fi
+if [ $mode_info_ldir_absolute ]; then
+    echo "$project/$ldir"
+fi
+
+if [ $mode_info ]; then
+    exit
+fi
 
 # get files for deployment
 if [ $all_files ]; then
