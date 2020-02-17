@@ -418,7 +418,7 @@ run_expect() {
             }
             timeout exit 2
         }
-        exit 1
+        exit 0
 DONE
     case "$?" in
         1) echo "failed"; echo "SSH connection failed" >&2; exit 1;;
@@ -436,6 +436,7 @@ run() {
 
 # copy tgz to remote system
 cmd="scp $tgz_file $host:/tmp/deploy-$id.tgz"
+echo "$cmd"
 echo -n "Transfering ... "
 case "$auth_type" in
     "pass") run_expect "$cmd" "$password" 600;;
