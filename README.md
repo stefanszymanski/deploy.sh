@@ -70,8 +70,10 @@ remote-dir.
 
 ## Remote host authentification
 
-Currently only password based authentification is supported. The password is
-read from pass (https://www.passwordstore.org).
+There are two options:
+
+- `prompt` - the normal ssh command, that may prompt for a password or passphrase
+- `pass` - an expect wrapper script for ssh, that reads a password from pass (https://www.passwordstore.org)
 
 ## Example configuration file
 
@@ -80,7 +82,7 @@ read from pass (https://www.passwordstore.org).
 # <name>  <host>              <auth-type>     <auth-data>
 dev       user@host           pass            project/ssh/dev
 stage     user@other-host     pass            project/ssh/stage
-live      user@example.org    pass            project/ssh/live
+live      user@example.org    prompt
 
 [targets]
 # <name>  <server>            <local-dir>     <remote-dir>          <post-commands>
