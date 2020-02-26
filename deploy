@@ -274,6 +274,7 @@ auth_config=${server_config[@]:3}
 postcmds=()
 IFS=';' read -ra postcmd_keys <<< "$postcmd"
 for c in ${postcmd_keys[@]}; do
+    postcmds+=("cd $rdir")
     while IFS= read -r _postcmd; do
         if [ "$_postcmd" ]; then
             postcmds+=("$_postcmd")
@@ -436,7 +437,6 @@ run() {
 
 # copy tgz to remote system
 cmd="scp $tgz_file $host:/tmp/deploy-$id.tgz"
-echo "$cmd"
 echo -n "Transfering ... "
 case "$auth_type" in
     "pass") run_expect "$cmd" "$password" 600;;
@@ -444,23 +444,26 @@ case "$auth_type" in
 esac
 echo "transfered"
 
-# build command for unpacking and post actions
-cmd="ssh $host \"tar --directory=$rdir --extract --gzip --file /tmp/deploy-$id.tgz ; rm -f /tmp/deploy-$id.tgz"
-if [ "$postcmds" ]; then
-    cmd+=" && cd $rdir"
-    for c in "${postcmds[@]}"; do
-        cmd+=" && $c"
-    done
-fi
-cmd+="\""
-
-# unpack and delete tgz and run post commands
+# unpack and delete tgz
+cmd="ssh $host \"tar --directory=$rdir --extract --gzip --file /tmp/deploy-$id.tgz ; rm -f /tmp/deploy-$id.tgz\""
 echo -n "Unpacking ... "
 case "$auth_type" in
     "pass") run_expect "$cmd" "$password" 600;;
     "prompt") run "$cmd";;
 esac
-echo " unpacked"
+echo "unpacked"
+
+# run post commands
+if [ "$postcmds" ]; then
+    remote_cmd=$(IFS=$'\n'; echo "${postcmds[*]}")
+    cmd="echo '$remote_cmd' | ssh -T $host"
+    echo -n "Post commands ... "
+    case "$auth_type" in
+        "pass") run_expect "$cmd" "$password" 600;;
+        "prompt") run "$cmd";;
+    esac
+    echo "executed"
+fi
 
 echo "Finished"
 exit
