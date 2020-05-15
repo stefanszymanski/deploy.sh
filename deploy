@@ -141,7 +141,7 @@ find_server() {
 get_targets() {
     local config=$1;
     local branch=$2
-    if [ "$branch" ]; then
+    if [ $branch ] && [ $(config_has_section "$config" "branch:$branch:targets") ]; then
         while IFS= read -r line; do
             local btarget=(${line})
             if [[ ${#btarget[@]} -gt 1 ]]; then
