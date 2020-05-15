@@ -86,12 +86,12 @@ readsection() {
     local config=$1
     local section=$2
     awk -v SECTION="$section" '
-      {
+    {
         if ($0 ~ /^\[.*\]$/) {
-          gsub(/^\[|\]$/, "", $0)
-          CUR=$0
-      } else if (($0 !~ /^#/) && (NF > 0) && (CUR==SECTION)) {
-          print $0
+            gsub(/^\[|\]$/, "", $0)
+            CUR=$0
+        } else if (($0 !~ /^#/) && (NF > 0) && (CUR==SECTION)) {
+            print $0
         }
     }' <<< "$config"
 }
